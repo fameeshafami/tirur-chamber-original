@@ -1,5 +1,14 @@
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
+// Uploaded files are stored as /api/public/uploads/... on the API host.
+// The public site is often a different host, so root-relative paths must follow the API origin.
+export function mediaUrl(value) {
+  if (!value || typeof value !== 'string') return '';
+  if (/^(https?:|data:|blob:)/i.test(value)) return value;
+  if (value.startsWith('/api/')) return `${String(API_BASE).replace(/\/api\/?$/, '')}${value}`;
+  return value;
+}
+
 /**
  * Core fetch wrapper — attaches JWT from localStorage, throws on non-2xx.
  */

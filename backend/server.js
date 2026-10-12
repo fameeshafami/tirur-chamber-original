@@ -21,17 +21,25 @@ const { UPLOAD_DIRECTORY } = require('./services/linkedImage');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const HOST = process.env.HOST || '0.0.0.0';
 let databaseReady = false;
 
-// Allowed frontend origins
-// Frontend (Next.js) runs on port 3000; backend API on port 5000.
-// Next.js rewrites /api/* → http://localhost:5000/api/* so in prod
-// requests arrive with the frontend origin, not the API origin.
+// Allowed frontend origins. CORS_ORIGIN is a comma-separated list, used in production.
+const configuredOrigins = (process.env.CORS_ORIGIN || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 const ALLOWED_ORIGINS = [
+  'https://tirur.osforh.com',
+  'https://www.tirur.osforh.com',
+  'https://app.osforh.com',
   'https://tirur-connect-main.onrender.com',
   'https://indigo-lion-193760.hostingersite.com',
   'http://localhost:3001',
   'http://127.0.0.1:3001',
+  'http://localhost:3004',
+  'http://127.0.0.1:3004',
+  ...configuredOrigins,
 ];
 
 // CORS Configuration
@@ -116,8 +124,8 @@ app.use((err, req, res, next) => {
 
 // Start HTTP server immediately so the process is always reachable,
 // then connect to MongoDB in the background.
-const server = app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+const server = app.listen(PORT, HOST, () => {
+  console.log(`Server running on ${HOST}:${PORT}`);
 });
 
 server.on('error', (error) => {

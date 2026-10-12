@@ -8,6 +8,16 @@ const Job = require('../models/Job');
 const ChamberMembership = require('../models/ChamberMembership');
 const CommunityUpdate = require('../models/CommunityUpdate');
 const { expireElapsedMemberships, membershipExpiry } = require('../services/chamberMembership');
+const { scheduleIsOpen } = require('../utils/kolkataTime');
+
+function publicAssetUrl(value) {
+  if (!value || typeof value !== 'string') return '';
+  if (/^(https?:|data:|blob:)/i.test(value)) return value;
+  if (!value.startsWith('/api/')) return value;
+  const configured = String(process.env.PUBLIC_API_URL || '').trim().replace(/\/$/, '');
+  if (!configured) return value;
+  return `${configured.replace(/\/api$/, '')}${value}`;
+}
 
 // A QR scan must never reveal account credentials, payment data, or dashboard data.
 const getMemberVerification = async (req, res) => {
@@ -96,14 +106,7 @@ const publicCommunityUpdates = async (req, res) => {
     ],
   };
   const [manualUpdates, newShopCount, latestShop, activeMemberCount, latestActiveMember, latestJob, activeAdCount, latestAd] = await Promise.all([
-    CommunityUpdate.find({
-      status: 'active',
-      category: { $in: ['shops_joined', 'hirings', 'active_members', 'ad_slots'] },
-      $and: [
-        { $or: [{ startAt: null }, { startAt: { $lte: now } }] },
-        { $or: [{ endAt: null }, { endAt: { $gte: now } }] },
-      ],
-    }).sort({ createdAt: -1 }).limit(50).select('category text icon createdAt'),
+    CommunityUpdate.find({ status: 'active' }).sort({ createdAt: -1 }).limit(50).select('category text icon createdAt startAt endAt'),
     Business.countDocuments({ status: 'approved', createdAt: { $gte: monthStart, $lte: now } }),
     Business.findOne({ status: 'approved', createdAt: { $gte: monthStart, $lte: now } }).sort({ createdAt: -1 }).select('createdAt'),
     ChamberMembership.countDocuments({ status: 'active' }),
@@ -113,9 +116,12 @@ const publicCommunityUpdates = async (req, res) => {
     Ad.findOne(adFilter).sort({ order: 1, createdAt: -1 }).select('title createdAt'),
   ]);
 
-  const updatesByCategory = new Map();
-  manualUpdates.forEach((update) => {
-    if (!updatesByCategory.has(update.category)) updatesByCategory.set(update.category, update);
+  const visibleManual = manualUpdates.filter((update) => scheduleIsOpen(update.startAt, update.endAt, now));
+  const manualItems = visibleManual.map((update) => {
+    const item = update.toObject();
+    delete item.startAt;
+    delete item.endAt;
+    return { ...item, source: 'manual' };
   });
 
   const derivedUpdates = [
@@ -141,13 +147,13 @@ const publicCommunityUpdates = async (req, res) => {
     } : null,
   ].filter(Boolean);
 
-  derivedUpdates.forEach((update) => {
-    if (!updatesByCategory.has(update.category)) updatesByCategory.set(update.category, update);
-  });
-
-  const updates = [...updatesByCategory.values()]
+  const coveredCategories = new Set(manualItems.map((item) => item.category));
+  const derivedItems = derivedUpdates
+    .filter((update) => !coveredCategories.has(update.category))
+    .map((item) => ({ ...item, source: 'derived', _id: `derived-${item.category}` }));
+  const updates = [...manualItems, ...derivedItems]
     .sort((first, second) => new Date(second.createdAt || 0) - new Date(first.createdAt || 0))
-    .slice(0, 4);
+    .slice(0, 12);
   res.json({ data: updates });
 };
 const publicOffers = async (req, res) => {
@@ -173,23 +179,6 @@ const publicOffer = async (req, res) => {
 const publicAds = async (req, res) => {
   const requestedPosition = String(req.query.position || req.query.placement || '').trim().toLowerCase();
   if (['left', 'right'].includes(requestedPosition)) {
-    const dateParts = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Asia/Kolkata',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).formatToParts(new Date()).reduce((parts, part) => {
-      if (part.type !== 'literal') parts[part.type] = part.value;
-      return parts;
-    }, {});
-    const today = `${dateParts.year}-${dateParts.month}-${dateParts.day}`;
-    const dateAsKolkataDay = (fieldNames) => ({
-      $dateToString: {
-        format: '%Y-%m-%d',
-        date: { $convert: { input: { $ifNull: fieldNames }, to: 'date', onError: null, onNull: null } },
-        timezone: 'Asia/Kolkata',
-      },
-    });
     const sideExpression = {
       $let: {
         vars: {
@@ -215,23 +204,10 @@ const publicAds = async (req, res) => {
     };
     const ads = await Ad.aggregate([
       { $match: { status: 'published', enabled: true, $or: [{ approval_status: 'approved' }, { approved: true }] } },
-      {
-        $set: {
-          _normalizedSide: sideExpression,
-          _startDateKolkata: dateAsKolkataDay(['$startDate', '$startAt']),
-          _endDateKolkata: dateAsKolkataDay(['$endDate', '$endAt']),
-        },
-      },
-      {
-        $match: {
-          _normalizedSide: requestedPosition,
-          _startDateKolkata: { $lte: today },
-          _endDateKolkata: { $gte: today },
-        },
-      },
+      { $set: { _normalizedSide: sideExpression } },
+      { $match: { _normalizedSide: requestedPosition } },
       { $set: { _sideOrderSort: { $ifNull: ['$sideOrder', 4] } } },
       { $sort: { _sideOrderSort: 1, createdAt: -1 } },
-      { $limit: 3 },
       {
         $set: {
           imageUrl: {
@@ -244,10 +220,13 @@ const publicAds = async (req, res) => {
           side: '$_normalizedSide',
         },
       },
-      { $unset: ['_normalizedSide', '_startDateKolkata', '_endDateKolkata', '_sideOrderSort'] },
+      { $unset: ['_normalizedSide', '_sideOrderSort'] },
     ]);
-    const data = ads.map((ad) => ({
+    const now = new Date();
+    const data = ads.filter((ad) => scheduleIsOpen(ad.startDate || ad.startAt, ad.endDate || ad.endAt, now)).slice(0, 3).map((ad) => ({
       ...ad,
+      imageUrl: publicAssetUrl(ad.imageUrl || ad.image_url || ''),
+      image_url: publicAssetUrl(ad.image_url || ''),
       adTitle: typeof ad.adTitle === 'string' ? ad.adTitle.replace(/<[^>]*>/g, '').trim().slice(0, 60) || null : null,
       description: typeof ad.description === 'string' ? ad.description.replace(/<[^>]*>/g, '').trim().slice(0, 120) || null : null,
     }));
@@ -256,17 +235,10 @@ const publicAds = async (req, res) => {
 
   const now = new Date();
   const statusFilter = { $in: ['active', 'published'] };
-  const dateFilter = {
-    $and: [
-      { $or: [{ startAt: { $lte: now } }, { startDate: { $lte: now } }] },
-      { $or: [{ endAt: { $gte: now } }, { endDate: { $gte: now } }] },
-    ],
-  };
   const filter = {
     status: statusFilter,
     enabled: true,
-    ...dateFilter,
-    $and: [...dateFilter.$and, { $or: [{ approval_status: 'approved' }, { approved: true }] }],
+    $and: [{ $or: [{ approval_status: 'approved' }, { approved: true }] }],
   };
   const placementMap = {
     left: ['left', 'sidebar-left'],
@@ -286,11 +258,11 @@ const publicAds = async (req, res) => {
   }
 
   const query = Ad.find(filter).sort({ order: 1, createdAt: -1 });
-  if (['left', 'right'].includes(requestedPosition)) query.limit(3);
   const ads = await query;
-  const data = ads.map((ad) => {
+  const data = ads.filter((ad) => scheduleIsOpen(ad.startDate || ad.startAt, ad.endDate || ad.endAt, now)).map((ad) => {
     const item = ad.toObject();
-    item.imageUrl = item.imageUrl || item.image_url || '';
+    item.imageUrl = publicAssetUrl(item.imageUrl || item.image_url || '');
+    item.image_url = publicAssetUrl(item.image_url || '');
     return item;
   });
   res.json({ data });
@@ -298,19 +270,16 @@ const publicAds = async (req, res) => {
 
 const publicHeroSlides = async (req, res) => {
   const now = new Date();
-  const slides = await HeroSlide.find({
-    active: true,
-    $and: [
-      { $or: [{ startDate: null }, { startDate: { $lte: now } }] },
-      { $or: [{ endDate: null }, { endDate: { $gte: now } }] },
-    ],
-  }).sort({ createdAt: -1 }).limit(6);
-  slides.sort((left, right) => left.order - right.order || right.createdAt - left.createdAt);
-  res.json({ data: slides.map((slide) => {
+  const slides = await HeroSlide.find({ active: { $ne: false } }).sort({ order: 1, createdAt: -1 }).limit(24);
+  const visible = slides.filter((slide) => scheduleIsOpen(slide.startDate, slide.endDate, now)).slice(0, 6);
+  res.json({ data: visible.map((slide) => {
     const item = slide.toObject();
-    item.desktopImage = item.desktopImage || item.image_url || '';
-    item.wideImage = item.wideImage || item.wide_image_url || '';
-    item.mobileImage = item.mobileImage || item.mobile_image_url || '';
+    item.desktopImage = publicAssetUrl(item.desktopImage || item.image_url || '');
+    item.wideImage = publicAssetUrl(item.wideImage || item.wide_image_url || '');
+    item.mobileImage = publicAssetUrl(item.mobileImage || item.mobile_image_url || '');
+    item.image_url = publicAssetUrl(item.image_url || '');
+    item.wide_image_url = publicAssetUrl(item.wide_image_url || '');
+    item.mobile_image_url = publicAssetUrl(item.mobile_image_url || '');
     item.show_text = item.show_text === true;
     item.title = typeof item.title === 'string' ? item.title.replace(/<[^>]*>/g, '').trim().slice(0, 80) : '';
     item.description = typeof item.description === 'string' ? item.description.replace(/<[^>]*>/g, '').trim().slice(0, 160) : '';
