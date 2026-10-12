@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { publicApi } from '../lib/api';
+import { mediaUrl, publicApi } from '../lib/api';
 
 const CATEGORIES = [
   { icon: '🍽️', label: 'Food & Dining', q: 'Food & Dining' },
@@ -101,17 +101,24 @@ function HeroSlider({ slides }) {
         {slides.map((slide, index) => (
           <article className={`home-hero-slide${index === activeIndex ? ' is-active' : ''}${slide.show_text === true && (slide.title?.trim() || slide.description?.trim()) ? ' has-text' : ''}`} key={slide._id} aria-hidden={index !== activeIndex} inert={index !== activeIndex}>
             <picture>
-              {slide.mobileImage && <source media="(max-width: 767px)" srcSet={slide.mobileImage} />}
-              {slide.wideImage && <source media="(min-width: 1921px)" srcSet={slide.wideImage} />}
+              {slide.mobileImage && <source media="(max-width: 767px)" srcSet={mediaUrl(slide.mobileImage)} />}
+              {slide.wideImage && <source media="(min-width: 1921px)" srcSet={mediaUrl(slide.wideImage)} />}
               <img
-                src={slide.desktopImage}
+                src={mediaUrl(slide.desktopImage)}
                 alt={slide.altText || slide.title || 'Tirur Connect featured banner'}
                 loading={index === 0 ? 'eager' : 'lazy'}
                 fetchPriority={index === 0 ? 'high' : 'auto'}
                 referrerPolicy={slide.image_source === 'url' || slide.image_url || slide.mobile_image_source === 'url' || slide.mobile_image_url || slide.wide_image_source === 'url' || slide.wide_image_url || /^https:\/\//i.test(slide.desktopImage || '') ? 'no-referrer' : undefined}
                 onError={(event) => {
-                  event.currentTarget.hidden = true;
-                  event.currentTarget.closest('.home-hero-slide')?.classList.add('is-image-fallback');
+                  const image = event.currentTarget;
+                  const remote = mediaUrl(slide.image_url);
+                  if (remote && image.dataset.fallback !== '1' && image.src !== remote) {
+                    image.dataset.fallback = '1';
+                    image.src = remote;
+                    return;
+                  }
+                  image.hidden = true;
+                  image.closest('.home-hero-slide')?.classList.add('is-image-fallback');
                 }}
               />
             </picture>
@@ -175,11 +182,19 @@ function SideAdCard({ ad }) {
     >
       <img
         className="side-ad-image"
-        src={ad.imageUrl}
+        src={mediaUrl(ad.imageUrl)}
         alt={ad.title || ad.adTitle || 'Sponsored advertisement'}
         loading="lazy"
         referrerPolicy={ad.image_source === 'url' || ad.image_url || /^https:\/\//i.test(ad.imageUrl || '') ? 'no-referrer' : undefined}
-        onError={() => setImageFailed(true)}
+        onError={(event) => {
+          const remote = mediaUrl(ad.image_url);
+          if (remote && event.currentTarget.dataset.fallback !== '1' && event.currentTarget.src !== remote) {
+            event.currentTarget.dataset.fallback = '1';
+            event.currentTarget.src = remote;
+            return;
+          }
+          setImageFailed(true);
+        }}
       />
       {(ad.adTitle || ad.description) && (
         <span className="side-ad-copy">
@@ -239,7 +254,15 @@ function InlineAdCard({ ad }) {
       {hasImage ? (
         <>
           <span className="home-sponsored-label">Sponsored</span>
-          <img src={ad.imageUrl} alt={ad.title || 'Sponsored advertisement'} loading="lazy" referrerPolicy={ad.image_source === 'url' || ad.image_url || /^https:\/\//i.test(ad.imageUrl || '') ? 'no-referrer' : undefined} onError={() => setImageFailed(true)} />
+          <img src={mediaUrl(ad.imageUrl)} alt={ad.title || 'Sponsored advertisement'} loading="lazy" referrerPolicy={ad.image_source === 'url' || ad.image_url || /^https:\/\//i.test(ad.imageUrl || '') ? 'no-referrer' : undefined} onError={(event) => {
+            const remote = mediaUrl(ad.image_url);
+            if (remote && event.currentTarget.dataset.fallback !== '1' && event.currentTarget.src !== remote) {
+              event.currentTarget.dataset.fallback = '1';
+              event.currentTarget.src = remote;
+              return;
+            }
+            setImageFailed(true);
+          }} />
         </>
       ) : (
         <>
@@ -343,7 +366,7 @@ export default function Home() {
 
   useEffect(() => {
     Promise.all([
-      publicApi.heroSlides(),
+      publicApi.heroSlides().catch(() => ({ data: [] })),
       publicApi.fetchAds('left').catch(()      => ({ data: [] })),
       publicApi.fetchAds('right').catch(()     => ({ data: [] })),
       publicApi.businesses('limit=6&status=approved').catch(() => ({ data: [] })),

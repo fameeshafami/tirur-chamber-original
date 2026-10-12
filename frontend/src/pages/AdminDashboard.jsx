@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { adminApi, apiRequest } from '../lib/api';
+import { adminApi, apiRequest, mediaUrl } from '../lib/api';
 import { convertImageLink } from '../lib/imageLink.js';
 import { useToast } from '../components/Toast.jsx';
 import PasswordVisibilityToggle from '../components/PasswordVisibilityToggle.jsx';
@@ -146,7 +146,7 @@ const newHeroSlideDraft = () => ({
   wideImage: '', wide_image_url: '', wide_image_source: 'upload', wideImageMethod: 'upload', wideImageLinkReady: false,
   mobileImage: '', mobile_image_url: '', mobile_image_source: 'upload', mobileImageMethod: 'upload', mobileImageLinkReady: false,
   copy_linked_image: true, altText: '', show_text: false, title: '', description: '', subtitle: '',
-  buttonText: '', buttonLink: '', order: 0, active: false,
+  buttonText: '', buttonLink: '', order: 0, active: true,
   startDate: localDateTime(), endDate: localDateTime(new Date(Date.now() + 30 * 86400000)),
 });
 
@@ -162,10 +162,30 @@ function imageDataUrl(file, { maxBytes, label }) {
     const image = new Image();
     image.onload = () => {
       URL.revokeObjectURL(objectUrl);
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = () => reject(new Error(`Unable to read the ${label.toLowerCase()} file.`));
-      reader.readAsDataURL(file);
+      const maxEdge = 1920;
+      const scale = Math.min(1, maxEdge / Math.max(image.width, image.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(image.width * scale));
+      canvas.height = Math.max(1, Math.round(image.height * scale));
+      const context = canvas.getContext('2d');
+      if (!context) {
+        reject(new Error(`Unable to prepare the ${label.toLowerCase()} file.`));
+        return;
+      }
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      const limit = Math.min(maxBytes, 700 * 1024);
+      let result = '';
+      for (const quality of [0.86, 0.74, 0.62, 0.5]) {
+        result = canvas.toDataURL('image/jpeg', quality);
+        const bytes = Math.ceil((result.length - result.indexOf(',') - 1) * 0.75);
+        if (bytes <= limit) break;
+      }
+      const bytes = Math.ceil((result.length - result.indexOf(',') - 1) * 0.75);
+      if (!result.startsWith('data:image/jpeg') || bytes > maxBytes) {
+        reject(new Error(`${label} must be under ${Math.round(maxBytes / 1024)} KB after upload.`));
+        return;
+      }
+      resolve(result);
     };
     image.onerror = () => {
       URL.revokeObjectURL(objectUrl);
@@ -308,7 +328,7 @@ function ImageMethodField({
         {loading && <span className="image-method-spinner" role="status" aria-label="Loading image" />}
         {previewSource && (
           <img
-            src={previewSource}
+            src={mediaUrl(previewSource)}
             alt={`${label} preview`}
             onLoad={updateDimensions}
             onError={failPreview}
@@ -1304,7 +1324,7 @@ export default function AdminDashboard() {
                     </>
                   )}
                   <div className="hero-slide-live-preview">
-                    {(heroSlideDraft.imageMethod === 'url' ? heroSlideDraft.image_url : heroSlideDraft.desktopImage) && <img src={heroSlideDraft.imageMethod === 'url' ? heroSlideDraft.image_url : heroSlideDraft.desktopImage} alt={heroSlideDraft.altText || 'Hero slide preview'} />}
+                    {(heroSlideDraft.imageMethod === 'url' ? heroSlideDraft.image_url : heroSlideDraft.desktopImage) && <img src={mediaUrl(heroSlideDraft.imageMethod === 'url' ? heroSlideDraft.image_url : heroSlideDraft.desktopImage)} alt={heroSlideDraft.altText || 'Hero slide preview'} />}
                     {heroSlideDraft.show_text === true && (heroSlideDraft.title.trim() || heroSlideDraft.description.trim()) && <span className="hero-slide-live-preview-overlay" />}
                     {heroSlideDraft.show_text === true && (heroSlideDraft.title.trim() || heroSlideDraft.description.trim()) && (
                       <div className="hero-slide-live-preview-caption">
@@ -1319,11 +1339,11 @@ export default function AdminDashboard() {
                   <div className="admin-actions"><button className="btn btn-primary" type="submit" disabled={(heroSlideDraft.imageMethod === 'url' ? !heroSlideDraft.imageLinkReady : !heroSlideDraft.desktopImage) || (heroSlideDraft.wideImageMethod === 'url' && !!heroSlideDraft.wide_image_url && !heroSlideDraft.wideImageLinkReady) || (heroSlideDraft.mobileImageMethod === 'url' && !!heroSlideDraft.mobile_image_url && !heroSlideDraft.mobileImageLinkReady)}>Save slide</button>{editingHeroSlide && <button className="btn btn-outline" type="button" onClick={() => { setEditingHeroSlide(''); setHeroSlideDraft(newHeroSlideDraft()); }}>Cancel</button>}</div>
                 </form>
                 <section className="admin-section">
-                  <h2>Hero Slider <small>Only the six newest active slides appear on the homepage.</small></h2>
+                  <h2>Hero Slider <small>The first six active slides, in display order, appear on the homepage.</small></h2>
                   <Table headings={['Preview', 'Slide', 'Dates', 'Status', 'Order']}>
                     {data.heroSlides.map((item) => (
                       <tr key={item._id} draggable onDragStart={(event) => event.dataTransfer.setData('text/plain', item._id)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); moveHeroSlide(event.dataTransfer.getData('text/plain'), item._id); }}>
-                        <td>{(item.desktopImage || item.image_url) && <img className="hero-slide-table-preview" src={item.desktopImage || item.image_url} alt={item.altText || 'Hero slide'} referrerPolicy={item.image_url ? 'no-referrer' : undefined} />}</td>
+                        <td>{(item.desktopImage || item.image_url) && <img className="hero-slide-table-preview" src={mediaUrl(item.desktopImage || item.image_url)} alt={item.altText || 'Hero slide'} referrerPolicy={item.image_url ? 'no-referrer' : undefined} />}</td>
                         <td><strong>{item.title || item.altText}</strong><small>{item.description || item.subtitle}</small></td>
                         <td>{item.startDate ? new Date(item.startDate).toLocaleDateString() : 'Any time'} – {item.endDate ? new Date(item.endDate).toLocaleDateString() : 'Any time'}</td>
                         <td>{item.active ? 'Active' : 'Inactive'}</td>
@@ -1372,7 +1392,7 @@ export default function AdminDashboard() {
                   <div className="side-ad-preview">
                     <strong>Live preview</strong>
                     <div className="side-ad-preview-card">
-                      {(adDraft.imageMethod === 'url' ? adDraft.image_url : adDraft.imageUrl) && <img className="side-ad-preview-image" src={adDraft.imageMethod === 'url' ? adDraft.image_url : adDraft.imageUrl} alt={adDraft.title || adDraft.adTitle || 'Sponsored advertisement preview'} />}
+                      {(adDraft.imageMethod === 'url' ? adDraft.image_url : adDraft.imageUrl) && <img className="side-ad-preview-image" src={mediaUrl(adDraft.imageMethod === 'url' ? adDraft.image_url : adDraft.imageUrl)} alt={adDraft.title || adDraft.adTitle || 'Sponsored advertisement preview'} />}
                       {(adDraft.adTitle || adDraft.description) && <div className="side-ad-preview-copy">{adDraft.adTitle.trim() && <strong className="side-ad-preview-title">{adDraft.adTitle.trim()}</strong>}{adDraft.description.trim() && <span className="side-ad-preview-description">{adDraft.description.trim()}</span>}</div>}
                     </div>
                   </div>
@@ -1394,7 +1414,7 @@ export default function AdminDashboard() {
                     const [statusLabel, statusClass] = adminAdStatus(item);
                     return (
                       <tr key={item._id}>
-                        <td>{(item.imageUrl || item.image_url) && <img className="ad-manager-preview" src={item.imageUrl || item.image_url} alt={item.title || 'Ad creative'} referrerPolicy={item.image_url || /^https:\/\//i.test(item.imageUrl || '') ? 'no-referrer' : undefined} />}<strong>{item.title}</strong></td>
+                        <td>{(item.imageUrl || item.image_url) && <img className="ad-manager-preview" src={mediaUrl(item.imageUrl || item.image_url)} alt={item.title || 'Ad creative'} referrerPolicy={item.image_url || /^https:\/\//i.test(item.imageUrl || '') ? 'no-referrer' : undefined} />}<strong>{item.title}</strong></td>
                         <td>{normalizedAdSide(item) === 'left' ? 'Left' : normalizedAdSide(item) === 'right' ? 'Right' : normalizedAdSide(item) === 'homepage' ? 'Homepage' : 'Directory'}</td>
                         <td><span className={`ad-status-badge ad-status-${statusClass}`}>{statusLabel}</span></td>
                         <td>{item.startAt ? new Date(item.startAt).toLocaleDateString() : '—'} – {item.endAt ? new Date(item.endAt).toLocaleDateString() : '—'}</td>

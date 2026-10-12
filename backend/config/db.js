@@ -77,6 +77,10 @@ const connectDB = async () => {
       { show_text: { $exists: false } },
       { $set: { show_text: false } },
     );
+    await HeroSlide.collection.updateMany(
+      { active: { $exists: false } },
+      { $set: { active: true } },
+    );
     return cached.conn;
   } catch (error) {
     cached.promise = null;

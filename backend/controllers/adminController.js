@@ -13,6 +13,7 @@ const Ad = require('../models/Ad');
 const HeroSlide = require('../models/HeroSlide');
 const { downloadPublicImage, storeDownloadedImage, readImageDimensions } = require('../services/linkedImage');
 const { convertImageLink } = require('../utils/imageLink');
+const { parseKolkataDate } = require('../utils/kolkataTime');
 const Notification = require('../models/Notification');
 const QrCode = require('../models/QrCode');
 const CommunityUpdate = require('../models/CommunityUpdate');
@@ -826,6 +827,15 @@ const updateNewsStatus = async (req, res) => {
 };
 const deleteNews = async (req, res) => { const news = await getOneOr404(News, req.params.id); await News.deleteOne({ _id: news._id }); res.json({ message: 'News item deleted.' }); };
 
+const applyKolkataSchedule = (body, fields) => {
+  fields.forEach((field) => {
+    if (!Object.prototype.hasOwnProperty.call(body, field) || body[field] == null || body[field] === '') {
+      if (Object.prototype.hasOwnProperty.call(body, field)) body[field] = null;
+      return;
+    }
+    body[field] = parseKolkataDate(body[field]);
+  });
+};
 const validateCommunityUpdate = ({ category, text, status, startAt, endAt }) => {
   if (!String(category || '').trim() || !String(text || '').trim()) {
     const error = new Error('category and text are required.');
@@ -859,6 +869,7 @@ const createCommunityUpdate = async (req, res) => {
     startAt: req.body.startAt || undefined,
     endAt: req.body.endAt || undefined,
   };
+  applyKolkataSchedule(body, ['startAt', 'endAt']);
   validateCommunityUpdate(body);
   const communityUpdate = await CommunityUpdate.create(body);
   res.status(201).json({ communityUpdate });
@@ -873,6 +884,7 @@ const updateCommunityUpdate = async (req, res) => {
     startAt: req.body.startAt === undefined ? communityUpdate.startAt : (req.body.startAt || null),
     endAt: req.body.endAt === undefined ? communityUpdate.endAt : (req.body.endAt || null),
   };
+  if (req.body.startAt !== undefined || req.body.endAt !== undefined) applyKolkataSchedule(body, ['startAt', 'endAt']);
   validateCommunityUpdate(body);
   communityUpdate.set(body);
   await communityUpdate.save();
@@ -944,16 +956,22 @@ const prepareAdImage = async (input) => {
     if (!body.image_url) throw Object.assign(new Error('Enter an image URL.'), { statusCode: 400 });
     const downloaded = await downloadPublicImage(body.image_url);
     if (copyLinkedImage) {
-      body.imageUrl = await storeDownloadedImage(downloaded);
+      try {
+        body.imageUrl = await storeDownloadedImage(downloaded);
+      } catch (error) {
+        console.error('Could not store linked ad image. Using the original URL.', error.message);
+        body.imageUrl = body.image_url;
+      }
     } else {
-      body.imageUrl = '';
+      body.imageUrl = body.image_url;
     }
   } else {
     body.image_source = 'upload';
     body.image_url = '';
     if (!body.imageUrl) throw Object.assign(new Error('Upload an ad image before saving.'), { statusCode: 400 });
-    validateUploadedImage(body.imageUrl, 'Advertisement image');
+    body.imageUrl = await persistUploadedImage(body.imageUrl, 'Advertisement image');
   }
+  applyKolkataSchedule(body, ['startAt', 'endAt', 'startDate', 'endDate']);
   return body;
 };
 const createAd = async (req, res) => {
@@ -1021,6 +1039,20 @@ const validateUploadedImage = (value, label) => {
       : buffer.subarray(0, 4).toString() === 'RIFF' && buffer.subarray(8, 12).toString() === 'WEBP';
   if (!validSignature) throw Object.assign(new Error(`${label} content does not match its image type.`), { statusCode: 400 });
 };
+const persistUploadedImage = async (value, label) => {
+  if (/^\/api\/public\/uploads\/[a-f0-9-]+\.(?:jpg|png|webp|gif)$/i.test(value)) return value;
+  validateUploadedImage(value, label);
+  const match = /^data:(image\/(?:jpeg|png|webp));base64,/.exec(value);
+  try {
+    return await storeDownloadedImage({
+      buffer: Buffer.from(value.slice(value.indexOf(',') + 1), 'base64'),
+      contentType: match[1],
+    });
+  } catch (error) {
+    console.error(`Could not store ${label} on disk. Keeping the uploaded image inline.`, error.message);
+    return value;
+  }
+};
 const sanitizeHeroSlideText = (input) => {
   const body = {};
   ['show_text', 'title', 'description'].forEach((field) => {
@@ -1064,9 +1096,14 @@ const prepareHeroSlide = async (input) => {
       }
       const downloaded = await downloadPublicImage(body[field.url]);
       if (copyLinkedImage) {
-        body[field.upload] = await storeDownloadedImage(downloaded);
+        try {
+          body[field.upload] = await storeDownloadedImage(downloaded);
+        } catch (error) {
+          console.error('Could not store linked hero image. Using the original URL.', error.message);
+          body[field.upload] = body[field.url];
+        }
       } else {
-        body[field.upload] = '';
+        body[field.upload] = body[field.url];
       }
       body[field.source] = 'url';
     } else {
@@ -1075,8 +1112,12 @@ const prepareHeroSlide = async (input) => {
       if (field.required && !body[field.upload]) {
         throw Object.assign(new Error('Upload a desktop image before saving the slide.'), { statusCode: 400 });
       }
-      if (body[field.upload]) validateUploadedImage(body[field.upload], field.upload);
+      if (body[field.upload]) body[field.upload] = await persistUploadedImage(body[field.upload], field.upload);
     }
+  }
+  applyKolkataSchedule(body, ['startDate', 'endDate']);
+  if (body.startDate && body.endDate && body.endDate < body.startDate) {
+    throw Object.assign(new Error('End date must be after the start date.'), { statusCode: 400 });
   }
   return body;
 };
