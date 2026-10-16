@@ -215,6 +215,7 @@ export const jobSeekerApi = {
   profile:       ()          => apiRequest('/job-seeker/profile'),
   updateProfile: (body)      => apiRequest('/job-seeker/profile', { method: 'PATCH', body: JSON.stringify(body) }),
   getCv:         ()          => apiRequest('/job-seeker/cv'),
+  cv:            ()          => apiRequest('/job-seeker/cv'),
   uploadCv:      (body)      => apiRequest('/job-seeker/cv', { method: 'POST', body: JSON.stringify(body) }),
   deleteCv:      ()          => apiRequest('/job-seeker/cv', { method: 'DELETE' }),
   applications:  ()          => apiRequest('/job-seeker/applications'),

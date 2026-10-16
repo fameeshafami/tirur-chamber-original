@@ -27,6 +27,7 @@ export default function JobSeekerDashboard() {
   const [location, setLocation] = useState('');
   const [employmentType, setEmploymentType] = useState('');
   const [applicationJob, setApplicationJob] = useState(null);
+  const [modalCv, setModalCv] = useState(null);
   const [applicationForm, setApplicationForm] = useState({ coverLetter: '', education: '', experience: '', skills: '' });
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
@@ -144,10 +145,8 @@ export default function JobSeekerDashboard() {
   async function submitApplication(event) {
     event.preventDefault();
     if (!applicationJob) return;
-    if (applicationJob.applicationMethod !== 'external' && !cv?.fileName) {
-      setTab('cv');
-      setApplicationJob(null);
-      toast('Upload a CV before applying to this job.', 'error');
+    if (applicationJob.applicationMethod !== 'external' && !cv?.fileName && !modalCv) {
+      toast('Please select or upload a CV before applying.', 'error');
       return;
     }
     setSaving(true);
@@ -156,8 +155,13 @@ export default function JobSeekerDashboard() {
         jobId: applicationJob._id,
         ...applicationForm,
         skills: applicationForm.skills.split(',').map((skill) => skill.trim()).filter(Boolean),
+        cvData: modalCv || undefined,
       });
+      if (modalCv) {
+        setCv({ fileName: modalCv.fileName, uploadedAt: new Date() });
+      }
       setApplicationJob(null);
+      setModalCv(null);
       setApplicationForm({ coverLetter: '', education: '', experience: '', skills: '' });
       toast('Application submitted.', 'success');
       await loadData();
@@ -274,7 +278,81 @@ export default function JobSeekerDashboard() {
         )}
       </div>
 
-      {applicationJob && <div className="modal-bg open" role="dialog" aria-modal="true" aria-labelledby="job-application-title" onClick={(event) => { if (event.target === event.currentTarget && !saving) setApplicationJob(null); }}><form className="modal-box jobseeker-apply-modal" onSubmit={submitApplication}><h2 id="job-application-title">Apply: {applicationJob.title}</h2><p className="text-soft">{applicationJob.company || 'Local business'}</p>{applicationJob.applicationMethod !== 'external' && <div className="alert alert-info">A CV is required for applications submitted through Tirur Connect. {cv?.fileName ? `Current CV: ${cv.fileName}` : 'Upload your CV in the CV tab first.'}</div>}<label>Cover letter<textarea rows="4" value={applicationForm.coverLetter} onChange={(event) => setApplicationForm({ ...applicationForm, coverLetter: event.target.value })} /></label><div className="admin-field-row"><label>Education<input value={applicationForm.education} onChange={(event) => setApplicationForm({ ...applicationForm, education: event.target.value })} /></label><label>Experience<input value={applicationForm.experience} onChange={(event) => setApplicationForm({ ...applicationForm, experience: event.target.value })} /></label></div><label>Skills (comma-separated)<input value={applicationForm.skills} onChange={(event) => setApplicationForm({ ...applicationForm, skills: event.target.value })} /></label><div className="admin-actions"><button type="button" className="btn btn-outline" onClick={() => setApplicationJob(null)} disabled={saving}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving || (applicationJob.applicationMethod !== 'external' && !cv?.fileName)}>{saving ? 'Submitting…' : 'Submit application'}</button></div></form></div>}
+      {applicationJob && (
+        <div className="modal-bg open" role="dialog" aria-modal="true" aria-labelledby="job-application-title" onClick={(event) => { if (event.target === event.currentTarget && !saving) setApplicationJob(null); }}>
+          <form className="modal-box jobseeker-apply-modal" onSubmit={submitApplication}>
+            <h2 id="job-application-title">Apply: {applicationJob.title}</h2>
+            <p className="text-soft">{applicationJob.company || 'Local business'}</p>
+            <div className="admin-field-row" style={{ marginTop: 12 }}>
+              <label>Education
+                <input value={applicationForm.education} onChange={(event) => setApplicationForm({ ...applicationForm, education: event.target.value })} placeholder="Your highest qualification" />
+              </label>
+              <label>Experience
+                <input value={applicationForm.experience} onChange={(event) => setApplicationForm({ ...applicationForm, experience: event.target.value })} placeholder="Years of relevant experience" />
+              </label>
+            </div>
+            <label>Skills (comma-separated)
+              <input value={applicationForm.skills} onChange={(event) => setApplicationForm({ ...applicationForm, skills: event.target.value })} placeholder="e.g. React, Node.js, MS Office" />
+            </label>
+            <label>Cover letter
+              <textarea rows="4" value={applicationForm.coverLetter} onChange={(event) => setApplicationForm({ ...applicationForm, coverLetter: event.target.value })} placeholder="Why are you a good fit for this role?" />
+            </label>
+            <div style={{ display: 'grid', gap: 6 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>
+                  Resume / CV {applicationJob.applicationMethod !== 'external' && <span style={{ color: 'var(--danger)' }}>*</span>}
+                </span>
+                {(modalCv?.fileName || cv?.fileName) && (
+                  <span className="cv-selected-badge">
+                    ✓ {modalCv?.fileName || cv?.fileName}
+                  </span>
+                )}
+              </div>
+              <div className="cv-upload-dropzone">
+                <input
+                  type="file"
+                  accept=".pdf,.doc,.docx"
+                  onChange={async (event) => {
+                    const file = event.target.files?.[0];
+                    if (!file) return;
+                    const ext = file.name.split('.').pop()?.toLowerCase();
+                    if (!['pdf', 'doc', 'docx'].includes(ext)) {
+                      toast('Choose a PDF, DOC, or DOCX file.', 'error');
+                      event.target.value = '';
+                      return;
+                    }
+                    if (file.size > 5 * 1024 * 1024) {
+                      toast('CV must be 5 MB or smaller.', 'error');
+                      event.target.value = '';
+                      return;
+                    }
+                    const encoded = await new Promise((resolve, reject) => {
+                      const reader = new FileReader();
+                      reader.onload = () => resolve(String(reader.result || '').split(',')[1] || '');
+                      reader.onerror = reject;
+                      reader.readAsDataURL(file);
+                    });
+                    setModalCv({ file: encoded, fileName: file.name, fileType: file.type || 'application/octet-stream', fileSize: file.size });
+                  }}
+                />
+                <div className="cv-dropzone-icon">📄</div>
+                <div className="cv-dropzone-text">
+                  {modalCv?.fileName ? 'Click or drop to replace CV' : cv?.fileName ? 'Click or drop to replace CV' : 'Click or drop your CV here'}
+                </div>
+                <div className="cv-dropzone-subtext">
+                  PDF, DOC, or DOCX up to 5 MB
+                </div>
+              </div>
+            </div>
+            <div className="admin-actions" style={{ marginTop: 14 }}>
+              <button type="button" className="btn btn-outline" onClick={() => setApplicationJob(null)} disabled={saving}>Cancel</button>
+              <button type="submit" className="btn btn-primary" disabled={saving || (applicationJob.applicationMethod !== 'external' && !cv?.fileName && !modalCv)}>
+                {saving ? 'Submitting…' : 'Submit application'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </section>
   );
 }

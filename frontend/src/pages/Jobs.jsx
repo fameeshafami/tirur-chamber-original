@@ -92,9 +92,47 @@ function JobDetailPanel({ job, onClose, onApply, onSave, savedIds, appliedIds })
   );
 }
 
-function ApplyModal({ job, onClose, onSubmit, loading }) {
+function ApplyModal({ job, onClose, onSubmit, loading, userCv }) {
   const [form, setForm] = useState({ coverLetter: '', education: '', experience: '', skills: '' });
+  const [cvFile, setCvFile] = useState(null);
+  const [cvFileName, setCvFileName] = useState('');
+  const [cvError, setCvError] = useState('');
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const handleFileChange = (e) => {
+    setCvError('');
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const allowed = ['pdf', 'doc', 'docx'];
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    if (!allowed.includes(ext)) {
+      setCvError('Only PDF, DOC, or DOCX files are allowed.');
+      e.target.value = '';
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setCvError('File size must be 5 MB or less.');
+      e.target.value = '';
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = String(reader.result || '').split(',')[1] || '';
+      setCvFile({
+        file: base64,
+        fileName: file.name,
+        fileType: file.type || 'application/octet-stream',
+        fileSize: file.size,
+      });
+      setCvFileName(file.name);
+    };
+    reader.onerror = () => setCvError('Error reading file. Please try again.');
+    reader.readAsDataURL(file);
+  };
+
+  const hasCv = Boolean(cvFile || userCv?.fileName);
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} role="dialog" aria-modal="true" aria-label="Apply for job">
@@ -114,12 +152,46 @@ function ApplyModal({ job, onClose, onSubmit, loading }) {
           <input id="apply-skills" className="form-control" value={form.skills} onChange={(e) => set('skills', e.target.value)} placeholder="e.g. React, Node.js, MS Office" />
         </div>
         <div className="form-group">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>Resume / CV {job.applicationMethod === 'tirur_connect' && <span style={{ color: 'var(--danger)' }}>*</span>}</span>
+            {hasCv && (
+              <span className="cv-selected-badge">
+                ✓ {cvFileName || userCv?.fileName}
+              </span>
+            )}
+          </div>
+          <div className="cv-upload-dropzone">
+            <input
+              id="apply-cv"
+              type="file"
+              accept=".pdf,.doc,.docx"
+              onChange={handleFileChange}
+            />
+            <div className="cv-dropzone-icon">📄</div>
+            <div className="cv-dropzone-text">
+              {cvFileName ? 'Click or drop to replace CV' : userCv?.fileName ? 'Click or drop to replace CV' : 'Click or drop your CV here'}
+            </div>
+            <div className="cv-dropzone-subtext">
+              PDF, DOC, or DOCX up to 5 MB
+            </div>
+          </div>
+          {cvError && <span className="form-error" role="alert" style={{ color: 'var(--danger)', fontSize: 12, marginTop: 4, display: 'block' }}>{cvError}</span>}
+        </div>
+        <div className="form-group">
           <label htmlFor="apply-letter">Cover Letter (optional)</label>
           <textarea id="apply-letter" className="form-control" rows={4} value={form.coverLetter} onChange={(e) => set('coverLetter', e.target.value)} placeholder="Why are you a good fit for this role?" />
         </div>
-        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 12 }}>
           <button className="btn btn-outline" onClick={onClose} disabled={loading}>Cancel</button>
-          <button className="btn btn-primary" onClick={() => onSubmit({ ...form, skills: form.skills.split(',').map((s) => s.trim()).filter(Boolean) })} disabled={loading}>
+          <button
+            className="btn btn-primary"
+            onClick={() => onSubmit({
+              ...form,
+              skills: form.skills.split(',').map((s) => s.trim()).filter(Boolean),
+              cvData: cvFile || undefined
+            })}
+            disabled={loading}
+          >
             {loading ? 'Submitting…' : 'Submit Application'}
           </button>
         </div>
@@ -143,6 +215,7 @@ export default function Jobs() {
   const [applyLoad,  setApplyLoad]  = useState(false);
   const [savedIds,   setSavedIds]   = useState(new Set());
   const [appliedIds, setAppliedIds] = useState(new Set());
+  const [userCv,     setUserCv]     = useState(null);
 
   const LIMIT = 10;
 
@@ -158,11 +231,12 @@ export default function Jobs() {
     } catch { setJobs([]); } finally { setLoading(false); }
   }, [search, empType]);
 
-  // Load saved & applied jobs for job seekers
+  // Load saved & applied jobs and user CV for job seekers
   useEffect(() => {
     if (!isLoggedIn || !isJobSeeker) return;
     jobSeekerApi.savedJobs().then((r) => setSavedIds(new Set((r.data || []).map((s) => s.job?._id || s.job)))).catch(() => {});
     jobSeekerApi.applications().then((r) => setAppliedIds(new Set((r.data || []).map((a) => a.job?._id || a.job)))).catch(() => {});
+    jobSeekerApi.getCv().then((r) => setUserCv(r.cv || null)).catch(() => {});
   }, [isLoggedIn, isJobSeeker]);
 
   useEffect(() => { fetchJobs(); }, [fetchJobs]);
@@ -178,6 +252,9 @@ export default function Jobs() {
     setApplyLoad(true);
     try {
       await jobSeekerApi.apply({ jobId: applying._id, ...formData });
+      if (formData.cvData?.fileName) {
+        setUserCv({ fileName: formData.cvData.fileName, uploadedAt: new Date() });
+      }
       setAppliedIds((s) => new Set([...s, applying._id]));
       toast('Application submitted!', 'success');
       setApplying(null);
@@ -318,6 +395,7 @@ export default function Jobs() {
           onClose={() => setApplying(null)}
           onSubmit={handleApplySubmit}
           loading={applyLoad}
+          userCv={userCv}
         />
       )}
     </div>
