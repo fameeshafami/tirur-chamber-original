@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { publicApi, jobSeekerApi } from '../lib/api';
+import { publicApi, jobSeekerApi, shopOwnerApi } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 
@@ -200,11 +200,157 @@ function ApplyModal({ job, onClose, onSubmit, loading, userCv }) {
   );
 }
 
+function PostJobModal({ onClose, onSuccess, isChamberMember }) {
+  const toast = useToast();
+  const [loading, setLoading] = useState(false);
+  const [form, setForm] = useState({
+    title: '',
+    location: '',
+    employmentType: 'Full-time',
+    category: '',
+    salary: '',
+    quantity: 1,
+    experience: '',
+    education: '',
+    skills: '',
+    description: '',
+    requirements: '',
+    applicationMethod: 'tirur_connect',
+    applicationLink: '',
+    closingDate: '',
+  });
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setForm((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!form.title.trim()) {
+      toast('Job title is required.', 'error');
+      return;
+    }
+    if (!form.description.trim()) {
+      toast('Job description is required.', 'error');
+      return;
+    }
+    setLoading(true);
+    try {
+      const payload = {
+        ...form,
+        quantity: Number(form.quantity) || 1,
+        skills: form.skills.split(',').map((s) => s.trim()).filter(Boolean),
+        closingDate: form.closingDate || undefined,
+      };
+      const res = await shopOwnerApi.createJob(payload);
+      toast(res.message || (isChamberMember ? 'Job posted and published successfully!' : 'Job submitted for admin review.'), 'success');
+      onSuccess();
+    } catch (err) {
+      toast(err.message || 'Failed to post job.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} role="dialog" aria-modal="true" aria-label="Post a Job">
+      <div style={{ background: '#fff', borderRadius: 18, padding: '24px 28px', width: '100%', maxWidth: 540, maxHeight: '90vh', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>Post a Job</h2>
+          <button type="button" onClick={onClose} style={{ border: 'none', background: 'transparent', fontSize: 18, cursor: 'pointer' }}>✕</button>
+        </div>
+        <p style={{ color: 'var(--ink-soft)', fontSize: 13, marginBottom: 16 }}>
+          {isChamberMember ? '✨ Chamber Member: Your job goes live immediately without review.' : 'Fill out the details below. Submitted jobs are reviewed by admins.'}
+        </p>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div className="form-group">
+            <label htmlFor="post-title">Job Title *</label>
+            <input id="post-title" name="title" className="form-control" required value={form.title} onChange={handleChange} placeholder="e.g. Sales Executive, Accountant" />
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="form-group">
+              <label htmlFor="post-loc">Location</label>
+              <input id="post-loc" name="location" className="form-control" value={form.location} onChange={handleChange} placeholder="e.g. Tirur Town" />
+            </div>
+            <div className="form-group">
+              <label htmlFor="post-type">Employment Type</label>
+              <select id="post-type" name="employmentType" className="form-control" value={form.employmentType} onChange={handleChange}>
+                {['Full-time', 'Part-time', 'Contract', 'Internship'].map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="form-group">
+              <label htmlFor="post-cat">Category</label>
+              <input id="post-cat" name="category" className="form-control" value={form.category} onChange={handleChange} placeholder="e.g. Retail, Healthcare" />
+            </div>
+            <div className="form-group">
+              <label htmlFor="post-sal">Salary / Compensation</label>
+              <input id="post-sal" name="salary" className="form-control" value={form.salary} onChange={handleChange} placeholder="e.g. ₹15,000 - ₹25,000/mo" />
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="form-group">
+              <label htmlFor="post-vac">Vacancies</label>
+              <input id="post-vac" name="quantity" type="number" min="1" className="form-control" value={form.quantity} onChange={handleChange} />
+            </div>
+            <div className="form-group">
+              <label htmlFor="post-deadline">Closing Date</label>
+              <input id="post-deadline" name="closingDate" type="date" className="form-control" value={form.closingDate} onChange={handleChange} />
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="post-desc">Job Description *</label>
+            <textarea id="post-desc" name="description" required rows={3} className="form-control" value={form.description} onChange={handleChange} placeholder="Describe daily duties, job overview..." />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="post-req">Requirements & Skills</label>
+            <textarea id="post-req" name="requirements" rows={2} className="form-control" value={form.requirements} onChange={handleChange} placeholder="Key qualifications, skills, languages..." />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="post-skills">Skills (comma-separated)</label>
+            <input id="post-skills" name="skills" className="form-control" value={form.skills} onChange={handleChange} placeholder="e.g. Accounting, Communication, Tally" />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="post-method">Application Method</label>
+            <select id="post-method" name="applicationMethod" className="form-control" value={form.applicationMethod} onChange={handleChange}>
+              <option value="tirur_connect">Apply via Tirur Connect (CVs submitted on platform)</option>
+              <option value="external">External Link / Website</option>
+            </select>
+          </div>
+
+          {form.applicationMethod === 'external' && (
+            <div className="form-group">
+              <label htmlFor="post-link">External Application URL *</label>
+              <input id="post-link" name="applicationLink" type="url" required className="form-control" value={form.applicationLink} onChange={handleChange} placeholder="https://..." />
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 12 }}>
+            <button type="button" className="btn btn-outline" onClick={onClose} disabled={loading}>Cancel</button>
+            <button type="submit" className="btn btn-primary" disabled={loading}>
+              {loading ? 'Posting…' : isChamberMember ? 'Publish Job' : 'Submit Job'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export default function Jobs() {
-  const { isLoggedIn, isJobSeeker } = useAuth();
+  const { isLoggedIn, isJobSeeker, isShopOwner, isChamberMember } = useAuth();
   const toast = useToast();
 
-  const [jobs,       setJobs]       = useState([]);
+  const [jobs,        setJobs]        = useState([]);
   const [total,      setTotal]      = useState(0);
   const [page,       setPage]       = useState(1);
   const [loading,    setLoading]    = useState(true);
@@ -216,6 +362,7 @@ export default function Jobs() {
   const [savedIds,   setSavedIds]   = useState(new Set());
   const [appliedIds, setAppliedIds] = useState(new Set());
   const [userCv,     setUserCv]     = useState(null);
+  const [postJobOpen, setPostJobOpen] = useState(false);
 
   const LIMIT = 10;
 
@@ -373,8 +520,36 @@ export default function Jobs() {
       <div className="card" style={{ marginTop: 32, background: 'linear-gradient(135deg,var(--brand-light),#fffdf5)', border: '1px solid #cfe6dc', textAlign: 'center', padding: '24px 20px' }}>
         <h3 style={{ fontSize: 16, color: 'var(--brand-dark)', marginBottom: 6 }}>Hiring? Post a Job for Free</h3>
         <p style={{ color: 'var(--ink-soft)', fontSize: 13, marginBottom: 14 }}>Reach hundreds of job seekers in Tirur and nearby areas.</p>
-        <Link to="/shop-owner" className="btn btn-primary">Post a Job</Link>
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={() => {
+            if (!isLoggedIn) {
+              toast('Please log in to post a job.', 'info');
+              return;
+            }
+            if (!isShopOwner && !isChamberMember) {
+              toast('Only registered shop owners or chamber members can post jobs.', 'error');
+              return;
+            }
+            setPostJobOpen(true);
+          }}
+        >
+          Post a Job
+        </button>
       </div>
+
+      {/* Post a Job modal */}
+      {postJobOpen && (
+        <PostJobModal
+          onClose={() => setPostJobOpen(false)}
+          onSuccess={() => {
+            setPostJobOpen(false);
+            fetchJobs(1);
+          }}
+          isChamberMember={isChamberMember}
+        />
+      )}
 
       {/* Job detail panel */}
       {selected && (

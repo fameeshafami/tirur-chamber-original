@@ -19,19 +19,18 @@ router.use(verifyToken, async (req, res, next) => {
       return res.status(403).json({ message: 'You do not have access to member documents.' });
     }
 
-    if (!['admin', 'super_admin'].includes(user.role)) {
+    if (!['admin', 'super_admin', 'chamber_member'].includes(user.role)) {
       const now = new Date();
       const membership = await ChamberMembership.exists({
         user: user._id,
         status: 'active',
-        paymentStatus: 'verified',
         $or: [
           { membershipExpiryDate: { $gte: now } },
           { membershipExpiryDate: { $exists: false }, expiresAt: { $gte: now } },
         ],
       });
       if (!membership) {
-        return res.status(403).json({ message: 'An active, paid Chamber Membership is required to access resumes.' });
+        return res.status(403).json({ message: 'An active Chamber Membership is required to access resumes.' });
       }
     }
 

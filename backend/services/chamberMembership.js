@@ -6,15 +6,18 @@ const Notification = require('../models/Notification');
 
 const publicAppUrl = () => (process.env.PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/$/, '');
 const membershipExpiry = (membership) => membership.membershipExpiryDate || membership.expiresAt;
-const hasActivePaidMembership = async (userId, now = new Date()) => Boolean(await ChamberMembership.exists({
-  user: userId,
-  status: 'active',
-  paymentStatus: 'verified',
-  $or: [
-    { membershipExpiryDate: { $gte: now } },
-    { membershipExpiryDate: { $exists: false }, expiresAt: { $gte: now } },
-  ],
-}));
+const hasActivePaidMembership = async (userId, now = new Date()) => {
+  const user = await require('../models/User').findById(userId).select('role status');
+  if (user && user.role === 'chamber_member' && user.status === 'active') return true;
+  return Boolean(await ChamberMembership.exists({
+    user: userId,
+    status: 'active',
+    $or: [
+      { membershipExpiryDate: { $gte: now } },
+      { membershipExpiryDate: { $exists: false }, expiresAt: { $gte: now } },
+    ],
+  }));
+};
 
 const issueMembershipNumber = async (membership) => {
   if (membership.membershipNumber) return membership.membershipNumber;
