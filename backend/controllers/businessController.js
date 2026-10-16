@@ -40,14 +40,14 @@ const getApprovedBusiness = async (req, res) => {
 };
 
 const createBusiness = async (req, res) => {
-  const { name, ownerPhone, category, description, phone, email, address, location, hours, open = true } = req.body;
+  const { name, ownerName, ownerPhone, category, description, phone, email, address, location, hours, open = true } = req.body;
   if (!name || !ownerPhone || !category || !description || !phone || !address) return res.status(400).json({ message: 'Business name, owner phone, category, description, business phone, and address are required.' });
   if (!/^[0-9+\s-]{10,15}$/.test(String(ownerPhone).trim())) return res.status(400).json({ message: 'Enter a valid owner phone number.' });
 
   const business = await Business.create({
     name, ownerPhone: String(ownerPhone).trim(), category, description, phone, email, address, location, hours, open,
     owner: req.user?.userId,
-    ownerName: req.user?.name,
+    ownerName: ownerName?.trim() || req.user?.name,
     status: 'pending',
   });
 

@@ -97,9 +97,10 @@ const validateEnum = (value, allowed, field) => {
   }
 };
 
-const getOneOr404 = async (Model, id, populate = []) => {
+const getOneOr404 = async (Model, id, populate = [], select = null) => {
   requireValidId(id);
   let query = Model.findById(id);
+  if (select) query = query.select(select);
   populate.forEach((path) => { query = query.populate(path); });
   const record = await query;
   if (!record) {
@@ -534,6 +535,7 @@ const listResource = async (Model, req, res, options = {}) => {
   Object.assign(filter, searchFilter(req.query.search, options.searchFields || []));
   if (options.extraFilter) options.extraFilter(req, filter);
   const query = Model.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit);
+  if (options.select) query.select(options.select);
   (options.populate || []).forEach((path) => { query.populate(path); });
   const [data, total] = await Promise.all([query, Model.countDocuments(filter)]);
   res.json(paginationResponse(data, page, limit, total));
@@ -541,9 +543,10 @@ const listResource = async (Model, req, res, options = {}) => {
 
 const getBusinesses = async (req, res) => listResource(Business, req, res, {
   statuses: BUSINESS_STATUSES, searchFields: ['name', 'ownerName', 'category', 'phone', 'email'],
+  select: '+ownerPhone',
   extraFilter: (request, filter) => { if (request.query.category) filter.category = request.query.category; },
 });
-const getBusiness = async (req, res) => res.json({ business: await getOneOr404(Business, req.params.id, ['owner']) });
+const getBusiness = async (req, res) => res.json({ business: await getOneOr404(Business, req.params.id, ['owner'], '+ownerPhone') });
 const updateBusinessStatus = async (req, res) => {
   validateEnum(req.body.status, BUSINESS_STATUSES, 'status');
   const business = await getOneOr404(Business, req.params.id);

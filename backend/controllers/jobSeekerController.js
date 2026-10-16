@@ -193,7 +193,7 @@ const getApplication = async (req, res) => {
 };
 
 const createApplication = async (req, res) => {
-  const { jobId, coverLetter, education, experience, skills } = req.body;
+  const { jobId, coverLetter, education, experience, skills, cvData } = req.body;
 
   if (!jobId) {
     return res.status(400).json({ message: 'Job ID is required.' });
@@ -222,14 +222,40 @@ const createApplication = async (req, res) => {
     return res.status(409).json({ message: 'You have already applied for this job.' });
   }
 
-  if (!coverLetter && !education && !experience && !skills) {
+  if (!coverLetter && !education && !experience && !skills && !cvData) {
     return res.status(400).json({ message: 'Application details are required.' });
   }
 
   const user = await User.findById(req.currentUser._id);
+
+  // If a new CV is uploaded inline with the application, save it to the user profile
+  if (cvData && cvData.file && cvData.fileName) {
+    const allowedExtensions = ['pdf', 'doc', 'docx'];
+    const safeName = String(cvData.fileName).replace(/[^a-zA-Z0-9._-]/g, '_');
+    const extension = safeName.split('.').pop()?.toLowerCase();
+    if (!allowedExtensions.includes(extension)) {
+      return res.status(400).json({ message: 'Only PDF, DOC, and DOCX files are allowed.' });
+    }
+    const allowedMimeTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+    if (cvData.fileType && cvData.fileType !== 'application/octet-stream' && !allowedMimeTypes.includes(cvData.fileType)) {
+      return res.status(400).json({ message: 'Invalid CV file type.' });
+    }
+    if (!Number.isInteger(Number(cvData.fileSize)) || Number(cvData.fileSize) <= 0 || Number(cvData.fileSize) > 5 * 1024 * 1024) {
+      return res.status(400).json({ message: 'CV file must be between 1 byte and 5MB.' });
+    }
+    user.cv = {
+      file: cvData.file,
+      fileName: safeName,
+      fileType: cvData.fileType || 'application/octet-stream',
+      fileSize: Number(cvData.fileSize) || 0,
+      uploadedAt: new Date(),
+    };
+    await user.save();
+  }
+
   const cv = user.cv;
   if (job.applicationMethod === 'tirur_connect' && !cv) {
-    return res.status(400).json({ message: 'A CV is required before applying to this job.' });
+    return res.status(400).json({ message: 'A CV is required before applying to this job. Please upload your CV.' });
   }
 
   const application = await JobApplication.create({

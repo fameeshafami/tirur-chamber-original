@@ -40,15 +40,15 @@ const registerUser = async (req, res) => {
       return res.status(400).json({ message: 'Name, email, phone, and password are required.' });
     }
 
-    const allowedRoles = ['shop_owner', 'job_seeker', 'chamber_member'];
+    const allowedRoles = ['shop_owner', 'job_seeker'];
 
-    if (role === 'admin') {
-      return res.status(403).json({ message: 'Admin registration is not allowed from a public request.' });
+    if (role === 'admin' || role === 'chamber_member') {
+      return res.status(403).json({ message: 'Admin and Chamber Member accounts cannot be created through public registration. Chamber membership is obtained by applying as a Shop Owner and receiving admin approval.' });
     }
 
     if (!allowedRoles.includes(role)) {
       return res.status(400).json({
-        message: 'Only shop_owner, job_seeker, and chamber_member roles are allowed for public registration.',
+        message: 'Only shop_owner and job_seeker roles are allowed for public registration.',
       });
     }
 

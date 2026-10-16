@@ -91,23 +91,22 @@ const createJob = async (req, res) => {
     business: business?._id,
     company: business?.name || req.currentUser.name,
     owner: req.currentUser._id,
-    status: 'published',
-    publishedAt: new Date(),
+    status: 'pending',
   });
   const admins = await User.find({ role: { $in: ['admin', 'super_admin'] }, status: 'active' }).select('_id');
   await Promise.all(admins.map((admin) => notify({
     type: 'job_submitted',
-    message: `${job.company} has published a new job: ${job.title}.`,
+    message: `New job submitted for approval by ${job.company}: ${job.title}.`,
     recipient: admin._id,
     entityType: 'Job',
     entityId: job._id,
   })));
-  res.status(201).json({ job });
+  res.status(201).json({ job, message: 'Job submitted for admin approval.' });
 };
 const updateJob = async (req, res) => {
   const job = await getById(Job, req.params.id, 'Job not found.'); assertOwner(job, req.currentUser._id);
   if (job.status === 'closed') return res.status(400).json({ message: 'Closed jobs cannot be edited.' });
-  validateJob({ ...job.toObject(), ...req.body }); Object.assign(job, jobInput(req.body)); job.status = 'published'; await job.save(); res.json({ job });
+  validateJob({ ...job.toObject(), ...req.body }); Object.assign(job, jobInput(req.body)); job.status = 'pending'; job.rejectionReason = ''; await job.save(); res.json({ job, message: 'Job updated and submitted for admin approval.' });
 };
 const deleteJob = async (req, res) => { const job = await getById(Job, req.params.id); assertOwner(job, req.currentUser._id); await Job.deleteOne({ _id: job._id }); res.json({ message: 'Job deleted.' }); };
 const closeJob = async (req, res) => { const job = await getById(Job, req.params.id); assertOwner(job, req.currentUser._id); if (job.status !== 'published') return res.status(400).json({ message: 'Only published jobs can be closed.' }); job.status = 'closed'; await job.save(); res.json({ job }); };
@@ -129,9 +128,6 @@ const getApplication = async (req, res) => {
   await application.populate([{ path: 'jobSeeker', select: candidateFields }, { path: 'job', select: 'title company requirements' }]); res.json({ application });
 };
 const getApplicationCv = async (req, res) => {
-  if (!(await hasActivePaidMembership(req.currentUser._id))) {
-    return res.status(403).json({ message: 'An active, paid Chamber Membership is required to access candidate CVs.' });
-  }
   const application = await getById(JobApplication, req.params.id, 'Application not found.');
   const job = await getById(Job, application.job, 'Job not found.');
   assertOwner(job, req.currentUser._id);
